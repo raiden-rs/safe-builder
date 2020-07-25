@@ -84,6 +84,26 @@ fn expand_masked_type_variables_decl(
         })
 }
 
+fn expand_filled_type_variables(
+    idents: &Vec<Ident>,
+    type_map: std::collections::HashMap<String, Type>,
+) -> impl Iterator<Item = proc_macro2::TokenStream> {
+    idents.clone().into_iter().map(move |ident| {
+        let ty = type_map.get(&ident.to_string()).unwrap();
+        quote! { #ty, }
+    })
+}
+
+fn create_field_type_map(fields: &FieldsNamed) -> std::collections::HashMap<String, Type> {
+    let mut field_type_map: std::collections::HashMap<String, Type> =
+        std::collections::HashMap::new();
+    for f in fields.named.iter() {
+        let name = f.ident.as_ref().unwrap().to_string();
+        field_type_map.insert(name, f.ty.clone());
+    }
+    field_type_map
+}
+
 pub(crate) fn expand(input: syn::DeriveInput) -> proc_macro2::TokenStream {
     let struct_name = input.ident;
 
@@ -105,13 +125,6 @@ pub(crate) fn expand(input: syn::DeriveInput) -> proc_macro2::TokenStream {
             quote! { #name: (), }
         }
     });
-
-    let mut field_type_map: std::collections::HashMap<String, Type> =
-        std::collections::HashMap::new();
-    for f in fields.named.iter() {
-        let name = f.ident.as_ref().unwrap().to_string();
-        field_type_map.insert(name, f.ty.clone());
-    }
 
     let builder_fields = fields.named.iter().map(|f| {
         let name = &f.ident;
@@ -141,6 +154,7 @@ pub(crate) fn expand(input: syn::DeriveInput) -> proc_macro2::TokenStream {
 
     let default_type_variables = expand_default_type_variables(&required_field_idents);
 
+    let field_type_map = create_field_type_map(&fields);
     let required_fns =
         required_field_idents
             .clone()
@@ -202,20 +216,33 @@ pub(crate) fn expand(input: syn::DeriveInput) -> proc_macro2::TokenStream {
     });
     let builder_type_variables = expand_all_type_variables(&required_field_idents);
 
+    let field_type_map = create_field_type_map(&fields);
+    let builder_filled_type_variables =
+        expand_filled_type_variables(&required_field_idents, field_type_map);
+
+    let method_name = format_ident!(
+        "{}",
+        if let Some(name) = find_method_name(&input.attrs) {
+            name
+        } else {
+            "builder".to_owned()
+        }
+    );
+
     quote! {
         pub struct #builder_name<#(#builder_type_variables)*> {
             #(#builder_fields)*
         }
 
         impl #struct_name {
-            pub fn builder() -> #builder_name<#(#default_type_variables)*> {
+            pub fn #method_name() -> #builder_name<#(#default_type_variables)*> {
                 #builder_name {
                     #(#default_builder_fields)*
                 }
             }
         }
 
-        impl #builder_name<String, String> {
+        impl #builder_name<#(#builder_filled_type_variables)*> {
             pub fn build(self) -> #struct_name {
                 #struct_name {
                     #(#build_fields)*
@@ -259,6 +286,45 @@ fn inner_type<'a>(wrapper: &str, ty: &'a syn::Type) -> Option<&'a syn::Type> {
             if let syn::GenericArgument::Type(ref t) = inner_ty {
                 return Some(t);
             }
+        }
+    }
+    None
+}
+
+fn find_eq_string_from(attr: &syn::Attribute, name: &str) -> Option<String> {
+    let mut tokens = match attr.tokens.clone().into_iter().next() {
+        Some(proc_macro2::TokenTree::Group(g)) => g.stream().into_iter(),
+        _ => return None,
+    };
+    match tokens.next() {
+        Some(proc_macro2::TokenTree::Ident(ref ident)) if *ident == name => {}
+        _ => return None,
+    };
+    // #[builder(method_name = )]
+    match tokens.next() {
+        Some(proc_macro2::TokenTree::Punct(ref punct)) if punct.as_char() == '=' => {}
+        _ => return None,
+    };
+    // #[builder(method_name = value)]
+    let lit = match tokens.next() {
+        Some(proc_macro2::TokenTree::Literal(lit)) => syn::Lit::new(lit),
+        _ => return None,
+    };
+    match &lit {
+        syn::Lit::Str(lit_str) => {
+            let value = lit_str.value();
+            if value.trim().is_empty() {
+                panic!()
+            };
+            Some(value)
+        }
+        _ => None,
+    }
+}
+fn find_method_name(attrs: &[syn::Attribute]) -> Option<String> {
+    for attr in attrs {
+        if let Some(lit) = find_eq_string_from(&attr, "method_name") {
+            return Some(lit);
         }
     }
     None
