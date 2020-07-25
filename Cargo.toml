@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "safe-builder-derive",
+    "safe-builder",
+]

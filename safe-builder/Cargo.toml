@@ -1,0 +1,15 @@
+[package]
+name = "safe-builder"
+version = "0.1.0"
+authors = ["bokuweb <bokuweb12@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[dependencies]
+safe-builder-derive = { version = "*", path = "../safe-builder-derive" }
+
+[dev-dependencies]
+pretty_assertions = "0.6.1"
+insta = "0.13"

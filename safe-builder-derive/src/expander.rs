@@ -1,0 +1,265 @@
+use convert_case::*;
+use quote::*;
+use syn::*;
+
+fn create_field_type(ident: &Ident) -> Ident {
+    let name = ident.to_string().to_case(Case::Pascal);
+    format_ident!("{}Type", name)
+}
+
+fn expand_default_type_variables(
+    idents: &Vec<Ident>,
+) -> impl Iterator<Item = proc_macro2::TokenStream> {
+    idents.clone().into_iter().map(|_ident| {
+        quote! { (), }
+    })
+}
+
+fn expand_masked_type_variables(
+    idents: &Vec<Ident>,
+    open_index: usize,
+) -> impl Iterator<Item = proc_macro2::TokenStream> {
+    idents
+        .clone()
+        .into_iter()
+        .enumerate()
+        .map(move |(index, ident)| {
+            if open_index == index {
+                quote! { (), }
+            } else {
+                let ident = create_field_type(&ident);
+                quote! { #ident, }
+            }
+        })
+}
+
+fn expand_all_type_variables(
+    idents: &Vec<Ident>,
+) -> impl Iterator<Item = proc_macro2::TokenStream> {
+    idents
+        .clone()
+        .into_iter()
+        .enumerate()
+        .map(move |(_index, ident)| {
+            let ident = create_field_type(&ident);
+            quote! { #ident, }
+        })
+}
+
+fn expand_return_types(
+    idents: &Vec<Ident>,
+    open_index: usize,
+    ty: &Type,
+) -> impl Iterator<Item = proc_macro2::TokenStream> {
+    let ty = ty.clone();
+    idents
+        .clone()
+        .into_iter()
+        .enumerate()
+        .map(move |(index, ident)| {
+            if open_index == index {
+                quote! { #ty, }
+            } else {
+                let ident = create_field_type(&ident);
+                quote! { #ident, }
+            }
+        })
+}
+
+fn expand_masked_type_variables_decl(
+    idents: &Vec<Ident>,
+    open_index: usize,
+) -> impl Iterator<Item = proc_macro2::TokenStream> {
+    idents
+        .clone()
+        .into_iter()
+        .enumerate()
+        .map(move |(index, ident)| {
+            if open_index == index {
+                quote! {}
+            } else {
+                let ident = create_field_type(&ident);
+                quote! { #ident, }
+            }
+        })
+}
+
+pub(crate) fn expand(input: syn::DeriveInput) -> proc_macro2::TokenStream {
+    let struct_name = input.ident;
+
+    let builder_name = format_ident!("__{}Builder", struct_name);
+
+    let fields = match input.data {
+        Data::Struct(DataStruct {
+            fields: Fields::Named(n),
+            ..
+        }) => n,
+        _ => panic!("`Builder` only supports `struct`."),
+    };
+
+    let default_builder_fields = fields.named.iter().map(|f| {
+        let name = &f.ident;
+        if is_option(&f.ty) {
+            quote! { #name: None, }
+        } else {
+            quote! { #name: (), }
+        }
+    });
+
+    let mut field_type_map: std::collections::HashMap<String, Type> =
+        std::collections::HashMap::new();
+    for f in fields.named.iter() {
+        let name = f.ident.as_ref().unwrap().to_string();
+        field_type_map.insert(name, f.ty.clone());
+    }
+
+    let builder_fields = fields.named.iter().map(|f| {
+        let name = &f.ident;
+        let ty = &f.ty;
+        if is_option(&f.ty) {
+            quote! { #name: #ty, }
+        } else {
+            let name = name.clone().unwrap();
+            let ident = create_field_type(&name);
+            quote! { #name: #ident, }
+        }
+    });
+
+    let required_field_idents: Vec<Ident> = fields
+        .named
+        .iter()
+        .filter(|f| !is_option(&f.ty))
+        .map(|f| f.ident.clone().unwrap())
+        .collect();
+
+    let optional_field_idents: Vec<Ident> = fields
+        .named
+        .iter()
+        .filter(|f| is_option(&f.ty))
+        .map(|f| f.ident.clone().unwrap())
+        .collect();
+
+    let default_type_variables = expand_default_type_variables(&required_field_idents);
+
+    let required_fns =
+        required_field_idents
+            .clone()
+            .into_iter()
+            .enumerate()
+            .map(|(index, ident)| {
+                let vars = expand_masked_type_variables(&required_field_idents, index);
+                let decls = expand_masked_type_variables_decl(&required_field_idents, index);
+                let rest_fields = fields.named.iter().map(|f| {
+                    let name = &f.ident;
+                    if name.clone().unwrap().to_string() == ident.to_string() {
+                        return quote! {};
+                    };
+                    quote! { #name: self.#name, }
+                });
+                let arg_type = field_type_map.get(&ident.to_string()).unwrap();
+                let return_types = expand_return_types(&required_field_idents, index, arg_type);
+                quote! {
+                    impl<#(#decls)*> #builder_name<#(#vars)*> {
+                        pub fn #ident(self, #ident: #arg_type) -> #builder_name<#(#return_types)*> {
+                            #builder_name{
+                                #ident,
+                                #(#rest_fields)*
+                            }
+                        }
+                    }
+                }
+            });
+
+    let optional_fns = optional_field_idents.clone().into_iter().map(|ident| {
+        let decls = expand_all_type_variables(&required_field_idents);
+        let types = expand_all_type_variables(&required_field_idents);
+        let return_types = expand_all_type_variables(&required_field_idents);
+        let rest_fields = fields.named.iter().map(|f| {
+            let name = &f.ident;
+            if name.clone().unwrap().to_string() == ident.to_string() {
+                return quote! {};
+            };
+            quote! { #name: self.#name, }
+        });
+        let arg_type = field_type_map.get(&ident.to_string()).unwrap();
+        let arg_type = inner_type("Option", arg_type).to_owned().unwrap();
+
+        quote! {
+            impl<#(#decls)*> #builder_name<#(#types)*> {
+                pub fn #ident(self, #ident: #arg_type) -> #builder_name<#(#return_types)*> {
+                    #builder_name{
+                        #ident: Some(#ident),
+                        #(#rest_fields)*
+                    }
+                }
+            }
+        }
+    });
+
+    let build_fields = fields.named.iter().map(|f| {
+        let name = &f.ident;
+        quote! { #name: self.#name, }
+    });
+    let builder_type_variables = expand_all_type_variables(&required_field_idents);
+
+    quote! {
+        pub struct #builder_name<#(#builder_type_variables)*> {
+            #(#builder_fields)*
+        }
+
+        impl #struct_name {
+            pub fn builder() -> #builder_name<#(#default_type_variables)*> {
+                #builder_name {
+                    #(#default_builder_fields)*
+                }
+            }
+        }
+
+        impl #builder_name<String, String> {
+            pub fn build(self) -> #struct_name {
+                #struct_name {
+                    #(#build_fields)*
+                }
+            }
+        }
+
+        #(#required_fns)*
+        #(#optional_fns)*
+    }
+}
+
+fn is_option(ty: &Type) -> bool {
+    match ty {
+        Type::Path(syn::TypePath {
+            path: syn::Path { segments, .. },
+            ..
+        }) => {
+            if segments.iter().any(|s| s.ident == "Option") {
+                true
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+fn inner_type<'a>(wrapper: &str, ty: &'a syn::Type) -> Option<&'a syn::Type> {
+    if let syn::Type::Path(ref p) = ty {
+        if p.path.segments.len() != 1 || p.path.segments[0].ident != wrapper {
+            return None;
+        }
+
+        if let syn::PathArguments::AngleBracketed(ref inner_ty) = p.path.segments[0].arguments {
+            if inner_ty.args.len() != 1 {
+                return None;
+            }
+
+            let inner_ty = inner_ty.args.first().unwrap();
+            if let syn::GenericArgument::Type(ref t) = inner_ty {
+                return Some(t);
+            }
+        }
+    }
+    None
+}
