@@ -87,7 +87,7 @@ fn expand_masked_type_variables_decl(
 pub(crate) fn expand(input: syn::DeriveInput) -> proc_macro2::TokenStream {
     let struct_name = input.ident;
 
-    let builder_name = format_ident!("__{}Builder", struct_name);
+    let builder_name = format_ident!("{}Builder", struct_name);
 
     let fields = match input.data {
         Data::Struct(DataStruct {
