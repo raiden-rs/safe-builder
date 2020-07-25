@@ -1,4 +1,5 @@
 # [WIP] safe-builder
+![Continuous Integration](https://github.com/raiden-rs/safe-builder/workflows/Continuous%20Integration/badge.svg)
 
 ## Examples
 
