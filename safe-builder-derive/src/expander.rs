@@ -108,6 +108,7 @@ pub(crate) fn expand(input: syn::DeriveInput) -> proc_macro2::TokenStream {
     let struct_name = input.ident;
 
     let builder_name = format_ident!("{}Builder", struct_name);
+    let default_builder_type = format_ident!("Default{}Builder", struct_name);
 
     let fields = match input.data {
         Data::Struct(DataStruct {
@@ -152,7 +153,7 @@ pub(crate) fn expand(input: syn::DeriveInput) -> proc_macro2::TokenStream {
         .map(|f| f.ident.clone().unwrap())
         .collect();
 
-    let default_type_variables = expand_default_type_variables(&required_field_idents);
+        let default_type_variables = expand_default_type_variables(&required_field_idents);
 
     let field_type_map = create_field_type_map(&fields);
     let required_fns =
@@ -229,10 +230,20 @@ pub(crate) fn expand(input: syn::DeriveInput) -> proc_macro2::TokenStream {
         }
     );
 
+    let default_builder_type_alias = {
+        let default_type_variables = expand_default_type_variables(&required_field_idents);
+        quote! {
+            pub type #default_builder_type = #builder_name<#(#default_type_variables)*>;
+        }
+    };
+
     quote! {
         pub struct #builder_name<#(#builder_type_variables)*> {
             #(#builder_fields)*
         }
+
+        #default_builder_type_alias
+
 
         impl #struct_name {
             pub fn #method_name() -> #builder_name<#(#default_type_variables)*> {
