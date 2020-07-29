@@ -153,7 +153,7 @@ pub(crate) fn expand(input: syn::DeriveInput) -> proc_macro2::TokenStream {
         .map(|f| f.ident.clone().unwrap())
         .collect();
 
-        let default_type_variables = expand_default_type_variables(&required_field_idents);
+    let default_type_variables = expand_default_type_variables(&required_field_idents);
 
     let field_type_map = create_field_type_map(&fields);
     let required_fns =
@@ -198,12 +198,38 @@ pub(crate) fn expand(input: syn::DeriveInput) -> proc_macro2::TokenStream {
         });
         let arg_type = field_type_map.get(&ident.to_string()).unwrap();
         let arg_type = inner_type("Option", arg_type).to_owned().unwrap();
-
         quote! {
             impl<#(#decls)*> #builder_name<#(#types)*> {
                 pub fn #ident(self, #ident: #arg_type) -> #builder_name<#(#return_types)*> {
                     #builder_name{
                         #ident: Some(#ident),
+                        #(#rest_fields)*
+                    }
+                }
+            }
+        }
+    });
+
+    let with_option_fns = optional_field_idents.clone().into_iter().map(|ident| {
+        let decls = expand_all_type_variables(&required_field_idents);
+        let types = expand_all_type_variables(&required_field_idents);
+        let return_types = expand_all_type_variables(&required_field_idents);
+        let rest_fields = fields.named.iter().map(|f| {
+            let name = &f.ident;
+            if name.clone().unwrap().to_string() == ident.to_string() {
+                return quote! {};
+            };
+            quote! { #name: self.#name, }
+        });
+        let arg_type = field_type_map.get(&ident.to_string()).unwrap();
+        let arg_type = inner_type("Option", arg_type).to_owned().unwrap();
+        let with_opt_fn_name = format_ident!("{}_with_option", ident);
+
+        quote! {
+            impl<#(#decls)*> #builder_name<#(#types)*> {
+                pub fn #with_opt_fn_name(self, #ident: Option<#arg_type>) -> #builder_name<#(#return_types)*> {
+                    #builder_name{
+                        #ident: #ident,
                         #(#rest_fields)*
                     }
                 }
@@ -263,6 +289,7 @@ pub(crate) fn expand(input: syn::DeriveInput) -> proc_macro2::TokenStream {
 
         #(#required_fns)*
         #(#optional_fns)*
+        #(#with_option_fns)*
     }
 }
 
