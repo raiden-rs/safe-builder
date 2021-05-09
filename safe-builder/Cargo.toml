@@ -11,5 +11,5 @@ edition = "2018"
 safe-builder-derive = { version = "*", path = "../safe-builder-derive" }
 
 [dev-dependencies]
-pretty_assertions = "0.6.1"
+pretty_assertions = "0.7.2"
 insta = "0.16"
