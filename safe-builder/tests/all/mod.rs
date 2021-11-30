@@ -41,4 +41,24 @@ mod tests {
             foo
         )
     }
+
+    #[derive(Builder, PartialEq, Debug)]
+    pub struct RawIdentifier {
+        id: String,
+        r#type: String,
+    }
+    #[test]
+    fn raw_identifier_test() {
+        let raw_ident = RawIdentifier::builder()
+            .id("1234".to_owned())
+            .r#type("type".to_owned())
+            .build();
+        assert_eq!(
+            RawIdentifier {
+                id: "1234".to_owned(),
+                r#type: "type".to_owned(),
+            },
+            raw_ident
+        )
+    }
 }
