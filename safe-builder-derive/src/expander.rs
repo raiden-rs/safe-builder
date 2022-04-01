@@ -1,9 +1,10 @@
 use convert_case::*;
 use quote::*;
 use syn::*;
+use syn::ext::IdentExt;
 
 fn create_field_type(ident: &Ident) -> Ident {
-    let name = ident.to_string().to_case(Case::Pascal);
+    let name = ident.unraw().to_string().to_case(Case::Pascal);
     format_ident!("{}Type", name)
 }
 
