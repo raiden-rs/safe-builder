@@ -12,4 +12,4 @@ safe-builder-derive = { version = "*", path = "../safe-builder-derive" }
 
 [dev-dependencies]
 pretty_assertions = "0.6.1"
-insta = "0.16"
+insta = "1.0"
